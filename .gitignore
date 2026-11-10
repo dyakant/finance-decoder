@@ -1,0 +1,113 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage
+ui/__pycache__/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Type checkers / linters
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pyre/
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ===== Virtual environments =====
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# ===== PyQt / Qt =====
+# Скомпилированные ресурсы (если используете .qrc — их можно коммитить,
+# а сгенерированные *_rc.py — нет)
+*_rc.py
+*.qm
+
+# ===== IDE / редакторы =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# ===== OS =====
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ===== Данные приложения =====
+# Локальный конфиг пользователя (в репозитории можно держать только
+# пример: config/config.example.json)
+config/config.json
+config/*.local.json
+
+# Пользовательские данные / результаты трансформаций
+input/
+output/
+*.out.json
+*_out.json
+transactions*.json
+!config/config.example.json
+
+# Логи
+*.log
+logs/
+
+# Бэкапы
+*.bak
+*.backup
+
+# ===== Секреты =====
+.env
+.env.*
+!.env.example
+secrets.json
