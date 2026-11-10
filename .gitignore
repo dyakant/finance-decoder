@@ -27,7 +27,6 @@ MANIFEST
 *.spec
 
 # Unit test / coverage
-ui/__pycache__/
 .pytest_cache/
 .coverage
 .coverage.*
