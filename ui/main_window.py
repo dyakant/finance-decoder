@@ -18,6 +18,7 @@ from ui.config_editor import ConfigEditorDialog
 from ui.info_dialog import TransactionInfoDialog
 from ui.unknown_dialog import UnknownAccountsDialog
 from ui.unmapped_dialog import UnmappedCategoriesDialog
+from ui.widgets import fit_columns
 
 PREVIEW_COLS = ["Дата", "Счёт банка", "Операция", "Сумма", "Тип", "Откуда", "Куда", "Правило"]
 KIND_NAMES = {"expense": "расход", "income": "доход", "transfer": "перевод", "saving": "накопление"}
@@ -33,6 +34,7 @@ class MainWindow(QMainWindow):
         self._last_input: Path | None = None
         self._last_output: Path | None = None
         self._last_conversion: ConversionResult | None = None
+        self._preview_sized = False
 
         self.setWindowTitle("Finance Decoder — банк → CoinKeeper")
         self.resize(1000, 700)
@@ -80,7 +82,7 @@ class MainWindow(QMainWindow):
         self.preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.preview.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         hdr = self.preview.horizontalHeader()
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.preview.itemSelectionChanged.connect(self._update_info_btn)
         self.preview.cellDoubleClicked.connect(lambda *_: self._open_info())
 
@@ -261,14 +263,16 @@ class MainWindow(QMainWindow):
                      KIND_NAMES.get(row.kind, row.kind), row.source, row.destination, row.reason]
             for c, text in enumerate(cells):
                 item = QTableWidgetItem(text)
+                item.setToolTip(text)
                 if c == 3:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 if row.needs_attention:
                     item.setBackground(ATTENTION_BG)
                     item.setForeground(ATTENTION_FG)
                 self.preview.setItem(r, c, item)
-        self.preview.resizeColumnsToContents()
-        self.preview.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        if not self._preview_sized:  # дальше ширину колонок задаёт пользователь
+            fit_columns(self.preview, wide_col=2)
+            self._preview_sized = bool(conv.rows)
         n_attn = sum(r.needs_attention for r in conv.rows)
         self.tabs.setTabText(0, f"Транзакции ({len(conv.rows)})")
         self.tabs.setTabText(1, f"Требует внимания ({n_attn})" if n_attn else "Требует внимания")

@@ -11,6 +11,7 @@ from core.coinkeeper_config import CKCategory, CoinKeeperFormatError
 from core.config_manager import CK_TYPE_NAMES, ConfigManager
 from core.ck_types import CK_TYPE_ORDER
 from ui.info_dialog import TransactionInfoDialog
+from ui.widgets import fit_columns
 
 COLS = ["Название", "Тип", "Валюта", "Статус", "Сумма", "Лимит", "Иконка", "ID"]
 
@@ -27,6 +28,7 @@ class CoinKeeperConfigDialog(QDialog):
         self.config = config
         self.store = config.ck_store
         self.changed = False  # конфигурацию перезагружали из файла
+        self._sized = False
         self.setWindowTitle("Конфигурация CoinKeeper")
         self.resize(1050, 640)
 
@@ -89,7 +91,6 @@ class CoinKeeperConfigDialog(QDialog):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.cellDoubleClicked.connect(self._show_raw)
         layout.addWidget(self.table, 1)
 
@@ -165,8 +166,9 @@ class CoinKeeperConfigDialog(QDialog):
                     font.setItalic(True)
                     item.setFont(font)
                 self.table.setItem(r, col, item)
-        self.table.resizeColumnsToContents()
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        if not self._sized:  # дальше ширину колонок задаёт пользователь
+            fit_columns(self.table, wide_col=0, wide_width=300)
+            self._sized = bool(self._rows)
         self.hint_label.setText(
             f"Показано: {len(self._rows)} из {len(self.store.categories)}. "
             "Двойной клик по строке — полный объект из конфигурации."

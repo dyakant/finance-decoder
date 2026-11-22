@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 
 from core.config_manager import CK_DEBT, CK_EXPENSE, CK_INCOME, CK_SAVING, ConfigManager
 from core.converter import FallbackGroup
-from ui.widgets import make_ck_combo
+from ui.widgets import fit_columns, make_ck_combo
 
 COLS = ["Кат. банка", "Название", "Опер.", "Направление", "Примеры", "Категория CoinKeeper"]
 
@@ -35,11 +35,9 @@ class UnmappedCategoriesDialog(QDialog):
         self.table = QTableWidget(len(groups), len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.table)
         self._fill_table()
+        fit_columns(self.table, wide_col=4, wide_width=300)
 
         buttons = QDialogButtonBox()
         save_btn = buttons.addButton("Сохранить правила", QDialogButtonBox.ButtonRole.AcceptRole)

@@ -1,4 +1,5 @@
-from PyQt6.QtWidgets import QComboBox
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QAbstractItemView, QComboBox, QHeaderView, QTableWidget
 
 from core.config_manager import CK_TYPE_NAMES, ConfigManager
 
@@ -27,3 +28,26 @@ def make_ck_combo(config: ConfigManager, types: tuple[int, ...], current: str = 
     if idx >= 0:
         combo.setCurrentIndex(idx)
     return combo
+
+
+def fit_columns(table: QTableWidget, wide_col: int | None = None,
+                wide_width: int = 380, max_width: int = 480) -> None:
+    """Колонки по содержимому, но с возможностью менять ширину вручную.
+
+    Режим Stretch не подходит: такая колонка не тянется мышью, и таблица никогда
+    не выходит за ширину окна, поэтому нет горизонтальной прокрутки. Здесь все
+    колонки Interactive; если они шире окна — появляется ползунок.
+    """
+    hdr = table.horizontalHeader()
+    hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+    hdr.setStretchLastSection(False)
+    hdr.setMinimumSectionSize(50)
+    table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    table.setTextElideMode(Qt.TextElideMode.ElideRight)
+    table.resizeColumnsToContents()
+    for col in range(table.columnCount()):
+        width = min(table.columnWidth(col), max_width)
+        if col == wide_col:
+            width = max(width, wide_width)
+        table.setColumnWidth(col, width)
