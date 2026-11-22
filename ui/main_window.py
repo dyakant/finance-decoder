@@ -1,11 +1,12 @@
+import json
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem,
-    QTabWidget, QVBoxLayout, QWidget,
+    QMessageBox, QPlainTextEdit, QPushButton, QTableWidget,
+    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from core.config_manager import ConfigManager
@@ -13,6 +14,7 @@ from core.converter import ConversionResult
 from core.runner import TransformWorker
 from core.transformer import TransformResult
 from ui.config_editor import ConfigEditorDialog
+from ui.info_dialog import TransactionInfoDialog
 from ui.unknown_dialog import UnknownAccountsDialog
 from ui.unmapped_dialog import UnmappedCategoriesDialog
 
@@ -49,9 +51,14 @@ class MainWindow(QMainWindow):
         self.fix_btn = QPushButton("Настроить операции без правил…")
         self.fix_btn.clicked.connect(self._open_unmapped_dialog)
         self.fix_btn.setEnabled(False)
+        self.info_btn = QPushButton("Информация")
+        self.info_btn.setToolTip("Исходный объект выбранной операции из файла банка (или двойной клик по строке)")
+        self.info_btn.setEnabled(False)
+        self.info_btn.clicked.connect(self._open_info)
         actions.addWidget(self.run_btn)
         actions.addWidget(edit_btn)
         actions.addWidget(self.fix_btn)
+        actions.addWidget(self.info_btn)
         actions.addStretch()
         layout.addLayout(actions)
 
@@ -69,6 +76,9 @@ class MainWindow(QMainWindow):
         self.preview.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         hdr = self.preview.horizontalHeader()
         hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.preview.itemSelectionChanged.connect(self._update_info_btn)
+        self.preview.cellDoubleClicked.connect(lambda *_: self._open_info())
+
         self.tabs.addTab(self.preview, "Транзакции")
 
         self.attention = QPlainTextEdit()
@@ -212,7 +222,25 @@ class MainWindow(QMainWindow):
                    else "<span style='color:#c0392b'>файл не сохранён</span>")
         self.summary.setText("<br>".join(filter(None, [line1, check + ("  ·  " + " · ".join(extra) if extra else ""), written])))
 
+    def _selected_row(self):
+        conv = self._last_conversion
+        row = self.preview.currentRow()
+        if conv and 0 <= row < len(conv.rows):
+            return conv.rows[row]
+        return None
+
+    def _update_info_btn(self) -> None:
+        self.info_btn.setEnabled(self._selected_row() is not None)
+
+    def _open_info(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            return
+        title = f"{row.date} · {row.name} · {row.amount:,.2f}".replace(",", " ")
+        TransactionInfoDialog(title, json.dumps(row.raw, ensure_ascii=False, indent=2), self).exec()
+
     def _fill_preview(self, conv: ConversionResult) -> None:
+        self.preview.clearSelection()
         self.preview.setRowCount(len(conv.rows))
         for r, row in enumerate(conv.rows):
             cells = [row.date, row.bank_account, row.name, f"{row.amount:,.2f}".replace(",", " "),

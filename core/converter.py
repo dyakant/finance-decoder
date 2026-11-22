@@ -34,6 +34,7 @@ class PreviewRow:
     destination: str     # куда (название узла CK)
     reason: str
     needs_attention: bool
+    raw: dict[str, Any] = field(default_factory=dict)   # исходная операция из файла банка
 
 
 @dataclass
@@ -332,6 +333,7 @@ def convert(
             destination=cfg.ck_name(tx["destinationId"]) if tx["destinationId"] else "⚠ не задан",
             reason=reason,
             needs_attention=attention,
+            raw=op,
         ))
 
     res.fallback_groups = _group_fallbacks(

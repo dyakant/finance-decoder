@@ -134,3 +134,9 @@ def test_bad_operation_reported_not_fatal(cfg):
 def test_validate_flags_missing_defaults(tmp_path):
     c = ConfigManager(tmp_path / "c.json")
     assert any("defaults.expense_cat_id" in p for p in c.validate())
+
+
+def test_preview_row_keeps_raw_operation(cfg):
+    o = op(operationId="42")
+    r = run([o], cfg)
+    assert r.rows[0].raw is o
