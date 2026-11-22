@@ -35,6 +35,8 @@ class PreviewRow:
     reason: str
     needs_attention: bool
     raw: dict[str, Any] = field(default_factory=dict)   # исходная операция из файла банка
+    source_id: str = ""
+    destination_id: str = ""
 
 
 @dataclass
@@ -124,17 +126,72 @@ def _credit_counterparts(ops: list[dict[str, Any]]) -> dict[str, str]:
     }
 
 
+# Ключ правила может начинаться с «доход:» — тогда оно применяется только к поступлениям.
+# Это позволяет иметь два правила для одного названия (исходящие и входящие переводы одному человеку).
+CREDIT_PREFIX = "доход:"
+
+
+def split_key(key: str) -> tuple[bool, str]:
+    """'доход:Иван' -> (True, 'Иван'); 'Иван' -> (False, 'Иван')."""
+    if key.lower().startswith(CREDIT_PREFIX):
+        return True, key[len(CREDIT_PREFIX):]
+    return False, key
+
+
+def rule_fits(op: dict[str, Any], rule: dict[str, Any], credit_only: bool = False) -> bool:
+    """Правило подходит операции по направлению: расход/накопление — списания, доход — поступления."""
+    is_debit = op.get("debet", True)
+    if credit_only and is_debit:
+        return False
+    rtype = rule.get("type")
+    if rtype == "income":
+        return not is_debit
+    if rtype in ("expense", "saving"):
+        return is_debit
+    return True  # transfer / skip
+
+
+def haystack(op: dict[str, Any]) -> str:
+    return " ".join(
+        op.get(k) or "" for k in ("operationType", "operationName", "fullOperationName")
+    ).lower()
+
+
+def find_name_rule(op: dict[str, Any], rules: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    """Правило по подстроке: из подходящих побеждает самый длинный (конкретный) шаблон."""
+    hay = haystack(op)
+    best: tuple[int, str, dict[str, Any]] | None = None
+    for key, rule in rules.items():
+        credit_only, pattern = split_key(key)
+        if pattern and pattern.lower() in hay and rule_fits(op, rule, credit_only):
+            if best is None or len(pattern) > best[0]:
+                best = (len(pattern), key, rule)
+    return (best[1], best[2]) if best else None
+
+
+def find_category_rule(op: dict[str, Any], rules: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    """Правило по parentCategory.id банка: ключ «доход:ID» важнее обычного «ID»."""
+    cat_id = (op.get("parentCategory") or {}).get("id")
+    if cat_id is None:
+        return None
+    candidates = [CREDIT_PREFIX + str(cat_id), str(cat_id)] if not op.get("debet", True) else [str(cat_id)]
+    for key in candidates:
+        rule = rules.get(key)
+        if rule is not None and rule_fits(op, rule, split_key(key)[0]):
+            return key, rule
+    return None
+
+
 def get_rule(
     op: dict[str, Any], cfg: ConfigManager, counterparts: dict[str, str] | None = None
 ) -> tuple[dict[str, Any] | None, str]:
-    """Возвращает (правило, тег-причина)."""
+    """Возвращает (правило, тег-причина).
+
+    Порядок: перевод между своими счетами -> правило по названию (конкретнее) ->
+    правило по категории банка -> категория по умолчанию.
+    """
     counterparts = counterparts or {}
     d = cfg.data
-    cat = op.get("parentCategory") or {}
-    vtb_cat_id = cat.get("id")
-    op_type = op.get("operationType") or ""
-    op_name = op.get("operationName") or ""
-    full_name = op.get("fullOperationName") or ""
     is_debit = op.get("debet", True)
 
     # 1. Внутренние переводы: обе стороны есть в выгрузке — берём только дебетовую
@@ -148,16 +205,15 @@ def get_rule(
             return {"type": "transfer", "src_id": src, "dst_id": dst}, REASON_OWN_TRANSFER
         # второй счёт не найден — падаем в общие правила
 
-    # 2. По parentCategory.id банка (ключи в JSON строковые)
-    key = str(vtb_cat_id) if vtb_cat_id is not None else ""
-    if key in d["vtb_category_rules"]:
-        return d["vtb_category_rules"][key], f"vtb_cat:{vtb_cat_id}"
+    # 2. По вхождению строки в название (самое конкретное из подходящих)
+    found = find_name_rule(op, d["operation_name_rules"])
+    if found:
+        return found[1], f"name_match:{found[0]}"
 
-    # 3. По вхождению строки
-    haystack = f"{op_type} {op_name} {full_name}".lower()
-    for pattern, rule in d["operation_name_rules"].items():
-        if pattern.lower() in haystack:
-            return rule, f"name_match:{pattern}"
+    # 3. По parentCategory.id банка (ключи в JSON строковые)
+    found = find_category_rule(op, d["vtb_category_rules"])
+    if found:
+        return found[1], f"vtb_cat:{found[0]}"
 
     # 4. Fallback
     if not is_debit:
@@ -334,6 +390,8 @@ def convert(
             reason=reason,
             needs_attention=attention,
             raw=op,
+            source_id=tx["sourceId"],
+            destination_id=tx["destinationId"],
         ))
 
     res.fallback_groups = _group_fallbacks(

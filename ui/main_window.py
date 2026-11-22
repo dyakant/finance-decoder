@@ -2,25 +2,31 @@ import json
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QBrush, QColor
+from PyQt6.QtGui import QBrush, QColor, QCursor
 from PyQt6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
+    QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QPlainTextEdit, QPushButton, QTableWidget,
-    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QTableWidgetItem, QTabWidget, QToolTip, QVBoxLayout, QWidget,
 )
 
 from core.config_manager import ConfigManager
 from core.converter import ConversionResult
+from core.rule_builder import (
+    SCOPE_CATEGORY, SCOPE_NAME, RuleError, apply_plan, count_similar, describe_scope, plan_rule,
+)
 from core.runner import TransformWorker
 from core.transformer import TransformResult
 from ui.coinkeeper_dialog import CoinKeeperConfigDialog
 from ui.config_editor import ConfigEditorDialog
 from ui.info_dialog import TransactionInfoDialog
+from ui.rule_menu import editable_side, pick_category
 from ui.unknown_dialog import UnknownAccountsDialog
 from ui.unmapped_dialog import UnmappedCategoriesDialog
 from ui.widgets import fit_columns
 
 PREVIEW_COLS = ["Дата", "Счёт банка", "Операция", "Сумма", "Тип", "Откуда", "Куда", "Правило"]
+COL_FROM, COL_TO = 5, 6
+EDIT_MARK = "  ▾"
 KIND_NAMES = {"expense": "расход", "income": "доход", "transfer": "перевод", "saving": "накопление"}
 ATTENTION_BG = QBrush(QColor("#fff3cd"))
 ATTENTION_FG = QBrush(QColor("#533f03"))
@@ -35,6 +41,9 @@ class MainWindow(QMainWindow):
         self._last_output: Path | None = None
         self._last_conversion: ConversionResult | None = None
         self._preview_sized = False
+        self._notice = ""                   # результат последнего созданного правила
+        self._notice_pending = ""
+        self._restore_view: tuple[int, int] | None = None   # (прокрутка, строка) после пересчёта
 
         self.setWindowTitle("Finance Decoder — банк → CoinKeeper")
         self.resize(1000, 700)
@@ -66,6 +75,17 @@ class MainWindow(QMainWindow):
         actions.addWidget(ck_btn)
         actions.addWidget(self.fix_btn)
         actions.addWidget(self.info_btn)
+        actions.addSpacing(16)
+        actions.addWidget(QLabel("Правило из таблицы по:"))
+        self.scope_combo = QComboBox()
+        self.scope_combo.addItem("названию операции", SCOPE_NAME)
+        self.scope_combo.addItem("категории банка", SCOPE_CATEGORY)
+        self.scope_combo.setToolTip(
+            "Клик по «Откуда» / «Куда» создаёт правило и применяет его к похожим операциям:\n"
+            "• по названию — операции с тем же названием (получатель, магазин);\n"
+            "• по категории банка — все операции этой категории банка."
+        )
+        actions.addWidget(self.scope_combo)
         actions.addStretch()
         layout.addLayout(actions)
 
@@ -85,6 +105,10 @@ class MainWindow(QMainWindow):
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.preview.itemSelectionChanged.connect(self._update_info_btn)
         self.preview.cellDoubleClicked.connect(lambda *_: self._open_info())
+        self.preview.cellClicked.connect(self._on_preview_clicked)
+        for col in (COL_FROM, COL_TO):
+            self.preview.horizontalHeaderItem(col).setToolTip(
+                "Нажмите на ячейку с ▾, чтобы выбрать категорию CoinKeeper и создать правило")
 
         self.tabs.addTab(self.preview, "Транзакции")
 
@@ -166,6 +190,7 @@ class MainWindow(QMainWindow):
             return
 
         self.run_btn.setEnabled(False)
+        self._notice, self._notice_pending = self._notice_pending, ""  # сообщение живёт один пересчёт
         self._log(f"→ Конвертация: {in_path}")
         self._last_input, self._last_output = in_path, out_path
 
@@ -236,7 +261,9 @@ class MainWindow(QMainWindow):
             extra.append(f"операций без правила: <b>{fallback}</b>")
         written = (f"💾 файл сохранён: {self._last_output}" if result.written
                    else "<span style='color:#c0392b'>файл не сохранён</span>")
-        self.summary.setText("<br>".join(filter(None, [line1, check + ("  ·  " + " · ".join(extra) if extra else ""), written])))
+        notice = f"<span style='color:#1e8449'>✔ {self._notice}</span>" if self._notice else ""
+        self.summary.setText("<br>".join(filter(None, [
+            notice, line1, check + ("  ·  " + " · ".join(extra) if extra else ""), written])))
 
     def _selected_row(self):
         conv = self._last_conversion
@@ -255,15 +282,65 @@ class MainWindow(QMainWindow):
         title = f"{row.date} · {row.name} · {row.amount:,.2f}".replace(",", " ")
         TransactionInfoDialog(title, json.dumps(row.raw, ensure_ascii=False, indent=2), self).exec()
 
+    def _on_preview_clicked(self, row: int, col: int) -> None:
+        """Клик по «Откуда» / «Куда»: меню категорий -> правило -> пересчёт."""
+        if col not in (COL_FROM, COL_TO):
+            return
+        conv = self._last_conversion
+        if not conv or not 0 <= row < len(conv.rows) or (self.worker and self.worker.isRunning()):
+            return
+        r = conv.rows[row]
+        side = editable_side(r)
+        if side is None:
+            QToolTip.showText(QCursor.pos(), "Перевод между своими счетами — правило не нужно", self.preview)
+            return
+        if (side == "destination") != (col == COL_TO):
+            QToolTip.showText(
+                QCursor.pos(),
+                "Это ваш счёт: он задаётся в «Редактор конфига → Счета банка».\n"
+                "Категория меняется в соседней колонке.", self.preview)
+            return
+
+        scope = self.scope_combo.currentData()
+        try:
+            _, _, label, _ = describe_scope(r.raw, scope)
+        except RuleError as e:
+            QMessageBox.warning(self, "Правило", str(e))
+            return
+        n = count_similar(conv.rows, r.raw, scope)
+        current = r.destination_id if side == "destination" else r.source_id
+        chosen = pick_category(self, self.config, r, f"Правило для: {label} — операций: {n}", current)
+        if not chosen:
+            return
+
+        try:
+            plan = plan_rule(r.raw, chosen, self.config, scope)
+        except RuleError as e:
+            QMessageBox.warning(self, "Правило", str(e))
+            return
+        apply_plan(self.config, plan)
+
+        msg = f"Правило: {plan.label} → «{self.config.ck_name(chosen)}», операций: {n}"
+        if plan.fell_back_to_name:
+            msg += " (у операции нет категории банка — правило создано по названию)"
+        if plan.replaces:
+            msg += f"; заменило «{self.config.ck_name(plan.replaces.get('cat_id', ''))}»"
+        self._notice_pending = msg
+        self._log(f"✔ {msg}  [ключ: {plan.key}]")
+        self._restore_view = (self.preview.verticalScrollBar().value(), row)
+        self._run_transform()
+
     def _fill_preview(self, conv: ConversionResult) -> None:
         self.preview.clearSelection()
         self.preview.setRowCount(len(conv.rows))
         for r, row in enumerate(conv.rows):
             cells = [row.date, row.bank_account, row.name, f"{row.amount:,.2f}".replace(",", " "),
                      KIND_NAMES.get(row.kind, row.kind), row.source, row.destination, row.reason]
+            side = editable_side(row)
             for c, text in enumerate(cells):
-                item = QTableWidgetItem(text)
-                item.setToolTip(text)
+                editable = (side == "destination" and c == COL_TO) or (side == "source" and c == COL_FROM)
+                item = QTableWidgetItem(text + EDIT_MARK if editable else text)
+                item.setToolTip("Нажмите, чтобы выбрать категорию и создать правило" if editable else text)
                 if c == 3:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 if row.needs_attention:
@@ -274,6 +351,12 @@ class MainWindow(QMainWindow):
             fit_columns(self.preview, wide_col=2)
             self._preview_sized = bool(conv.rows)
         n_attn = sum(r.needs_attention for r in conv.rows)
+        if self._restore_view is not None:
+            scroll, sel = self._restore_view
+            self._restore_view = None
+            self.preview.verticalScrollBar().setValue(scroll)
+            if 0 <= sel < len(conv.rows):
+                self.preview.selectRow(sel)
         self.tabs.setTabText(0, f"Транзакции ({len(conv.rows)})")
         self.tabs.setTabText(1, f"Требует внимания ({n_attn})" if n_attn else "Требует внимания")
 

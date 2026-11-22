@@ -140,3 +140,50 @@ def test_preview_row_keeps_raw_operation(cfg):
     o = op(operationId="42")
     r = run([o], cfg)
     assert r.rows[0].raw is o
+
+
+# ── приоритет и направление правил ───────────────────────────────────────────
+
+def test_name_rule_beats_bank_category_rule(cfg):
+    cfg.data["operation_name_rules"] = {"Магазин": {"type": "expense", "cat_id": "cat_misc"}}
+    r = run([op()], cfg)  # категория банка 11 -> «Еда», но название конкретнее
+    assert r.transactions[0]["destinationId"] == "cat_misc"
+    assert r.rows[0].reason == "name_match:Магазин"
+
+
+def test_longest_name_pattern_wins(cfg):
+    cfg.data["operation_name_rules"] = {
+        "цех": {"type": "expense", "cat_id": "cat_misc"},
+        "Цех 85": {"type": "expense", "cat_id": "cat_food"},
+    }
+    r = run([op(operationName="Цех 85", fullOperationName="Цех 85")], cfg)
+    assert r.transactions[0]["destinationId"] == "cat_food"
+
+
+def test_expense_rule_does_not_apply_to_incoming(cfg):
+    cfg.data["operation_name_rules"] = {"Иван": {"type": "expense", "cat_id": "cat_food"}}
+    r = run([op(operationName="Иван", debet=False, parentCategory={"id": 77, "name": "x"})], cfg)
+    tx = r.transactions[0]
+    assert (tx["sourceId"], tx["destinationId"]) == ("cat_in", "acc_main")  # fallback дохода
+    assert r.rows[0].reason == "fallback"
+
+
+def test_credit_prefixed_key_gives_separate_incoming_rule(cfg):
+    cfg.data["operation_name_rules"] = {
+        "Иван": {"type": "expense", "cat_id": "cat_food"},
+        "доход:Иван": {"type": "income", "cat_id": "cat_salary"},
+    }
+    out = run([op(operationName="Иван"), op(operationName="Иван", debet=False, operationId="2")], cfg)
+    assert [(t["sourceId"], t["destinationId"]) for t in out.transactions] == [
+        ("acc_main", "cat_food"), ("cat_salary", "acc_main"),
+    ]
+
+
+def test_credit_prefixed_category_rule(cfg):
+    cfg.data["vtb_category_rules"] = {
+        "50": {"type": "expense", "cat_id": "cat_food"},
+        "доход:50": {"type": "income", "cat_id": "cat_salary"},
+    }
+    rows = run([op(parentCategory={"id": 50, "name": "x"}),
+                op(parentCategory={"id": 50, "name": "x"}, debet=False, operationId="2")], cfg).rows
+    assert [r.reason for r in rows] == ["vtb_cat:50", "vtb_cat:доход:50"]
