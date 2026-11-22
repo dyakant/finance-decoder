@@ -1,0 +1,21 @@
+{
+  "account_map": {
+    "*0000": "ID_счёта_CoinKeeper"
+  },
+  "categories": {
+    "ID_счёта_CoinKeeper": { "name": "Основная карта", "type": 2 },
+    "ID_категории_расхода": { "name": "Продукты", "type": 3 },
+    "ID_категории_дохода": { "name": "Зарплата", "type": 1 },
+    "ID_накопления": { "name": "Подушка", "type": 6 }
+  },
+  "vtb_category_rules": {
+    "11": { "type": "expense", "cat_id": "ID_категории_расхода" }
+  },
+  "operation_name_rules": {
+    "заработной платы": { "type": "income", "cat_id": "ID_категории_дохода" }
+  },
+  "defaults": {
+    "expense_cat_id": "ID_категории_расхода",
+    "income_cat_id": "ID_категории_дохода"
+  }
+}

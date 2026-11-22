@@ -1,54 +1,72 @@
 from PyQt6.QtWidgets import (
-    QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QHeaderView,
 )
+from PyQt6.QtCore import Qt
 
-from core.config_manager import ConfigManager
+from core.config_manager import CK_ACCOUNT, ConfigManager
+from ui.widgets import AddNodeDialog, make_ck_combo
 
 
 class UnknownAccountsDialog(QDialog):
-    """Показывает список неизвестных счетов и позволяет добавить их в конфиг."""
+    """Счета банка, которых нет в account_map: сопоставляем их со счетами CoinKeeper."""
 
     def __init__(self, accounts: list[str], config: ConfigManager, parent=None):
         super().__init__(parent)
         self.config = config
+        self.accounts = accounts
+        self._added_any = False
         self.setWindowTitle("Неизвестные счета")
-        self.resize(560, 380)
+        self.resize(620, 400)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Обнаружены счета, отсутствующие в конфиге. "
-            "Укажите отображаемое имя и нажмите «Добавить»."
+            "Эти счета банка не сопоставлены со счетами CoinKeeper.\n"
+            "Выберите счёт CoinKeeper для каждого и нажмите «Сохранить в конфиг»."
         ))
 
         self.table = QTableWidget(len(accounts), 2)
-        self.table.setHorizontalHeaderLabels(["Счёт", "Отображаемое имя"])
-        self.table.horizontalHeader().setStretchLastSection(True)
-
-        for row, acc in enumerate(accounts):
-            acc_item = QTableWidgetItem(acc)
-            acc_item.setFlags(acc_item.flags() & ~acc_item.flags().__class__.ItemIsEditable)
-            self.table.setItem(row, 0, acc_item)
-            self.table.setItem(row, 1, QTableWidgetItem(acc))
-
+        self.table.setHorizontalHeaderLabels(["Счёт банка", "Счёт CoinKeeper"])
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table)
+        self._fill_table()
 
-        add_btn = QPushButton("Добавить отмеченные в конфиг")
-        add_btn.clicked.connect(self._add_selected)
-        layout.addWidget(add_btn)
+        row = QHBoxLayout()
+        new_btn = QPushButton("＋ Новый счёт CoinKeeper…")
+        new_btn.clicked.connect(self._add_node)
+        row.addWidget(new_btn)
+        row.addStretch()
+        layout.addLayout(row)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons = QDialogButtonBox()
+        save_btn = buttons.addButton("Сохранить в конфиг", QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons.addButton(QDialogButtonBox.StandardButton.Close)
+        save_btn.clicked.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self._added_any = False
+    def _fill_table(self) -> None:
+        self.combos = []
+        for row, acc in enumerate(self.accounts):
+            item = QTableWidgetItem(acc)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 0, item)
+            combo = make_ck_combo(self.config, (CK_ACCOUNT,))
+            self.table.setCellWidget(row, 1, combo)
+            self.combos.append(combo)
 
-    def _add_selected(self) -> None:
-        for row in range(self.table.rowCount()):
-            acc = self.table.item(row, 0).text()
-            name = self.table.item(row, 1).text().strip() or acc
-            if not self.config.is_known_account(acc):
-                self.config.add_account(acc, name)
+    def _add_node(self) -> None:
+        if AddNodeDialog(self.config, self, CK_ACCOUNT).exec():
+            selected = [c.currentData() for c in self.combos]
+            self._fill_table()
+            for combo, data in zip(self.combos, selected):
+                combo.setCurrentIndex(max(combo.findData(data), 0))
+
+    def _save(self) -> None:
+        for acc, combo in zip(self.accounts, self.combos):
+            ck_id = combo.currentData()
+            if ck_id and not self.config.is_known_account(acc):
+                self.config.add_account(acc, ck_id)
                 self._added_any = True
         self.accept()
 
