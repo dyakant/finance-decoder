@@ -1,12 +1,12 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView, QLabel, QPushButton,
+    QDialog, QDialogButtonBox, QHeaderView, QLabel,
     QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
-from core.config_manager import CK_EXPENSE, CK_INCOME, CK_SAVING, ConfigManager
+from core.config_manager import CK_DEBT, CK_EXPENSE, CK_INCOME, CK_SAVING, ConfigManager
 from core.converter import FallbackGroup
-from ui.widgets import AddNodeDialog, make_ck_combo
+from ui.widgets import make_ck_combo
 
 COLS = ["Кат. банка", "Название", "Опер.", "Направление", "Примеры", "Категория CoinKeeper"]
 
@@ -41,13 +41,6 @@ class UnmappedCategoriesDialog(QDialog):
         layout.addWidget(self.table)
         self._fill_table()
 
-        row = QHBoxLayout()
-        new_btn = QPushButton("＋ Новая категория CoinKeeper…")
-        new_btn.clicked.connect(self._add_node)
-        row.addWidget(new_btn)
-        row.addStretch()
-        layout.addLayout(row)
-
         buttons = QDialogButtonBox()
         save_btn = buttons.addButton("Сохранить правила", QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.addButton(QDialogButtonBox.StandardButton.Close)
@@ -60,8 +53,8 @@ class UnmappedCategoriesDialog(QDialog):
         if direction == "income":
             return (CK_INCOME,)
         if direction == "expense":
-            return (CK_EXPENSE, CK_SAVING)
-        return (CK_EXPENSE, CK_INCOME, CK_SAVING)
+            return (CK_EXPENSE, CK_DEBT, CK_SAVING)
+        return (CK_EXPENSE, CK_DEBT, CK_INCOME, CK_SAVING)
 
     def _fill_table(self) -> None:
         self.combos = []
@@ -77,19 +70,12 @@ class UnmappedCategoriesDialog(QDialog):
             self.table.setCellWidget(row, 5, combo)
             self.combos.append(combo)
 
-    def _add_node(self) -> None:
-        if AddNodeDialog(self.config, self, CK_EXPENSE).exec():
-            selected = [c.currentData() for c in self.combos]
-            self._fill_table()
-            for combo, data in zip(self.combos, selected):
-                combo.setCurrentIndex(max(combo.findData(data), 0))
-
     def _save(self) -> None:
         for g, combo in zip(self.groups, self.combos):
             cat_id = combo.currentData()
             if not cat_id:
                 continue
-            node_type = self.config.data["categories"][cat_id].get("type")
+            node_type = self.config.nodes()[cat_id].get("type")
             rule_type = "income" if node_type == CK_INCOME else "saving" if node_type == CK_SAVING else "expense"
             self.config.set_vtb_rule(g.bank_cat_id, {"type": rule_type, "cat_id": cat_id})
             self._added_any = True

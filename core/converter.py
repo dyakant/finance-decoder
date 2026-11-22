@@ -176,7 +176,7 @@ def build_tx(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     account_map = cfg.data["account_map"]
-    categories = cfg.data["categories"]
+    categories = cfg.nodes()
 
     amount = op["operationAmount"]["sum"]
     date_raw = op.get("operationDate") or op.get("transactionDate") or ""

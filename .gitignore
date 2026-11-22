@@ -112,3 +112,5 @@ logs/
 .env.*
 !.env.example
 secrets.json
+# Конфигурация CoinKeeper пользователя (балансы, лимиты) — не коммитим
+config/coinkeeper_configuration.json

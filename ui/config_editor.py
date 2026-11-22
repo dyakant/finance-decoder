@@ -6,11 +6,14 @@ from PyQt6.QtWidgets import (
 )
 
 from core.config_manager import (
-    CK_ACCOUNT, CK_EXPENSE, CK_INCOME, CK_SAVING, CK_TYPE_NAMES, ConfigManager,
+    CK_ACCOUNT, CK_DEBT, CK_EXPENSE, CK_INCOME, CK_SAVING, ConfigManager,
 )
-from ui.widgets import AddNodeDialog, make_ck_combo
+from ui.widgets import make_ck_combo
 
-RULE_CAT_TYPES = {"expense": (CK_EXPENSE,), "income": (CK_INCOME,), "saving": (CK_SAVING,)}
+# Расход может уходить и в категорию расхода, и в кредит / долг
+RULE_CAT_TYPES = {"expense": (CK_EXPENSE, CK_DEBT), "income": (CK_INCOME,), "saving": (CK_SAVING,)}
+NO_NODES_HINT = "Нет подходящих узлов. Загрузите конфигурацию в окне «Конфигурация CoinKeeper»."
+
 
 
 def _ro(text: str) -> QTableWidgetItem:
@@ -28,7 +31,6 @@ class ConfigEditorDialog(QDialog):
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_nodes_tab(), "Узлы CoinKeeper")
         self.tabs.addTab(self._build_accounts_tab(), "Счета банка")
         self.tabs.addTab(self._build_rules_tab("vtb"), "Правила: категории банка")
         self.tabs.addTab(self._build_rules_tab("name"), "Правила: по названию")
@@ -60,36 +62,6 @@ class ConfigEditorDialog(QDialog):
     def _confirm_delete(self, what: str) -> bool:
         return QMessageBox.question(self, "Удалить", f"Удалить {what}?") == QMessageBox.StandardButton.Yes
 
-    # ── Узлы CoinKeeper ──────────────────────────────────────────────────────
-    def _build_nodes_tab(self) -> QWidget:
-        w, self.nodes_table = self._table_tab(
-            ["ID", "Название", "Тип"],
-            [("Добавить", self._add_node), ("Удалить выбранный", self._delete_node)],
-        )
-        self._refresh_nodes()
-        return w
-
-    def _refresh_nodes(self) -> None:
-        nodes = self.config.get_ck_nodes()
-        self.nodes_table.setRowCount(len(nodes))
-        for row, (cid, node) in enumerate(nodes.items()):
-            self.nodes_table.setItem(row, 0, _ro(cid))
-            self.nodes_table.setItem(row, 1, _ro(node.get("name", "")))
-            self.nodes_table.setItem(row, 2, _ro(CK_TYPE_NAMES.get(node.get("type"), "?")))
-
-    def _add_node(self) -> None:
-        if AddNodeDialog(self.config, self).exec():
-            self._refresh_nodes()
-
-    def _delete_node(self) -> None:
-        row = self.nodes_table.currentRow()
-        if row < 0:
-            return
-        cid = self.nodes_table.item(row, 0).text()
-        if self._confirm_delete(f"узел {self.config.ck_name(cid)}"):
-            self.config.remove_ck_node(cid)
-            self._refresh_nodes()
-
     # ── Счета банка ──────────────────────────────────────────────────────────
     def _build_accounts_tab(self) -> QWidget:
         w, self.accounts_table = self._table_tab(
@@ -112,7 +84,7 @@ class ConfigEditorDialog(QDialog):
             return
         accounts = self.config.get_ck_nodes((CK_ACCOUNT,))
         if not accounts:
-            QMessageBox.information(self, "Нет счетов", "Сначала добавьте счёт CoinKeeper на вкладке «Узлы CoinKeeper».")
+            QMessageBox.information(self, "Нет счетов", NO_NODES_HINT)
             return
         labels = [f"{n['name']} ({cid})" for cid, n in accounts.items()]
         choice, ok = QInputDialog.getItem(self, "Счёт CoinKeeper", "Соответствует:", labels, 0, False)
@@ -172,7 +144,7 @@ class ConfigEditorDialog(QDialog):
         if rule_type != "skip":
             nodes = self.config.get_ck_nodes(RULE_CAT_TYPES[rule_type])
             if not nodes:
-                QMessageBox.information(self, "Нет категорий", "Добавьте нужную категорию на вкладке «Узлы CoinKeeper».")
+                QMessageBox.information(self, "Нет категорий", NO_NODES_HINT)
                 return
             labels = [f"{n['name']} ({cid})" for cid, n in nodes.items()]
             choice, ok = QInputDialog.getItem(self, "Категория CoinKeeper", "Категория:", labels, 0, False)

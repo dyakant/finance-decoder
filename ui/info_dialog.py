@@ -7,9 +7,9 @@ from PyQt6.QtWidgets import (
 class TransactionInfoDialog(QDialog):
     """Окно с исходным объектом операции из файла банка (JSON-текст)."""
 
-    def __init__(self, title: str, text: str, parent=None):
+    def __init__(self, title: str, text: str, parent=None, window_title: str = "Информация об операции"):
         super().__init__(parent)
-        self.setWindowTitle("Информация об операции")
+        self.setWindowTitle(window_title)
         self.resize(720, 640)
 
         layout = QVBoxLayout(self)

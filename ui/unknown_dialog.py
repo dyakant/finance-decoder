@@ -1,11 +1,11 @@
 from PyQt6.QtWidgets import (
-    QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QHeaderView,
+    QDialog, QDialogButtonBox, QHeaderView, QLabel,
+    QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 from PyQt6.QtCore import Qt
 
 from core.config_manager import CK_ACCOUNT, ConfigManager
-from ui.widgets import AddNodeDialog, make_ck_combo
+from ui.widgets import make_ck_combo
 
 
 class UnknownAccountsDialog(QDialog):
@@ -22,7 +22,8 @@ class UnknownAccountsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
             "Эти счета банка не сопоставлены со счетами CoinKeeper.\n"
-            "Выберите счёт CoinKeeper для каждого и нажмите «Сохранить в конфиг»."
+            "Выберите счёт CoinKeeper для каждого и нажмите «Сохранить в конфиг».\n"
+            "Нужного счёта нет в списке? Загрузите свежую конфигурацию в окне «Конфигурация CoinKeeper»."
         ))
 
         self.table = QTableWidget(len(accounts), 2)
@@ -30,13 +31,6 @@ class UnknownAccountsDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table)
         self._fill_table()
-
-        row = QHBoxLayout()
-        new_btn = QPushButton("＋ Новый счёт CoinKeeper…")
-        new_btn.clicked.connect(self._add_node)
-        row.addWidget(new_btn)
-        row.addStretch()
-        layout.addLayout(row)
 
         buttons = QDialogButtonBox()
         save_btn = buttons.addButton("Сохранить в конфиг", QDialogButtonBox.ButtonRole.AcceptRole)
@@ -54,13 +48,6 @@ class UnknownAccountsDialog(QDialog):
             combo = make_ck_combo(self.config, (CK_ACCOUNT,))
             self.table.setCellWidget(row, 1, combo)
             self.combos.append(combo)
-
-    def _add_node(self) -> None:
-        if AddNodeDialog(self.config, self, CK_ACCOUNT).exec():
-            selected = [c.currentData() for c in self.combos]
-            self._fill_table()
-            for combo, data in zip(self.combos, selected):
-                combo.setCurrentIndex(max(combo.findData(data), 0))
 
     def _save(self) -> None:
         for acc, combo in zip(self.accounts, self.combos):

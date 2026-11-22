@@ -13,6 +13,7 @@ from core.config_manager import ConfigManager
 from core.converter import ConversionResult
 from core.runner import TransformWorker
 from core.transformer import TransformResult
+from ui.coinkeeper_dialog import CoinKeeperConfigDialog
 from ui.config_editor import ConfigEditorDialog
 from ui.info_dialog import TransactionInfoDialog
 from ui.unknown_dialog import UnknownAccountsDialog
@@ -48,6 +49,9 @@ class MainWindow(QMainWindow):
         self.run_btn.clicked.connect(self._run_transform)
         edit_btn = QPushButton("⚙ Редактор конфига")
         edit_btn.clicked.connect(self._open_config_editor)
+        ck_btn = QPushButton("Конфигурация CoinKeeper")
+        ck_btn.setToolTip("Счета, категории, цели и долги CoinKeeper и файл хранения этой конфигурации")
+        ck_btn.clicked.connect(self._open_coinkeeper_config)
         self.fix_btn = QPushButton("Настроить операции без правил…")
         self.fix_btn.clicked.connect(self._open_unmapped_dialog)
         self.fix_btn.setEnabled(False)
@@ -57,6 +61,7 @@ class MainWindow(QMainWindow):
         self.info_btn.clicked.connect(self._open_info)
         actions.addWidget(self.run_btn)
         actions.addWidget(edit_btn)
+        actions.addWidget(ck_btn)
         actions.addWidget(self.fix_btn)
         actions.addWidget(self.info_btn)
         actions.addStretch()
@@ -90,7 +95,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.log, "Лог")
         layout.addWidget(self.tabs, 1)
 
-        for w in config.load_warnings:
+        for w in config.load_warnings + config.ck_store.warnings:
             self._log(f"⚠ {w}")
         for p in config.validate():
             self._log(f"⚠ Конфиг: {p}")
@@ -124,6 +129,15 @@ class MainWindow(QMainWindow):
 
     def _open_config_editor(self) -> None:
         ConfigEditorDialog(self.config, self).exec()
+
+    def _open_coinkeeper_config(self) -> None:
+        dlg = CoinKeeperConfigDialog(self.config, self)
+        dlg.exec()
+        if dlg.changed:
+            n = len(self.config.ck_store.categories)
+            self._log(f"✔ Конфигурация CoinKeeper обновлена: {n} объектов ({self.config.ck_store.path})")
+            for p in self.config.validate():
+                self._log(f"⚠ Конфиг: {p}")
 
     def _open_unmapped_dialog(self) -> None:
         conv = self._last_conversion

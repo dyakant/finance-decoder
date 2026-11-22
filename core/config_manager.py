@@ -3,25 +3,19 @@ import json
 from pathlib import Path
 from typing import Any
 
-# Типы узлов CoinKeeper (sourceType / destinationType)
-CK_INCOME = 1    # категория дохода
-CK_ACCOUNT = 2   # счёт
-CK_EXPENSE = 3   # категория расхода
-CK_SAVING = 6    # цель накопления
-
-CK_TYPE_NAMES = {
-    CK_INCOME: "Доход",
-    CK_ACCOUNT: "Счёт",
-    CK_EXPENSE: "Расход",
-    CK_SAVING: "Накопление",
-}
+from .ck_types import (  # noqa: F401  (реэкспорт для остального кода)
+    CK_ACCOUNT, CK_DEBT, CK_EXPENSE, CK_INCOME, CK_SAVING, CK_TYPE_NAMES,
+)
+from .coinkeeper_config import STORAGE_FILENAME, CoinKeeperStore
 
 RULE_TYPES = ("expense", "income", "saving", "transfer", "skip")
 
 DEFAULT_CONFIG: dict[str, Any] = {
     # номер счёта в банке ("*0683") -> ID счёта в CoinKeeper
     "account_map": {},
-    # ID в CoinKeeper -> {"name": str, "type": 1|2|3|6}
+    # Устаревшее ручное описание узлов: ID -> {"name": str, "type": 1|2|3|5|6}.
+    # Источник истины — конфигурация CoinKeeper (core/coinkeeper_config.py);
+    # здесь остаются только узлы, которых в ней нет.
     "categories": {},
     # parentCategory.id банка (строкой) -> {"type": "expense", "cat_id": "..."}
     "vtb_category_rules": {},
@@ -45,6 +39,8 @@ class ConfigManager:
         self.config_path = config_path
         self.data: dict[str, Any] = {}
         self.load_warnings: list[str] = []
+        # Файл хранения конфигурации CoinKeeper лежит рядом с config.json
+        self.ck_store = CoinKeeperStore(config_path.parent / STORAGE_FILENAME)
         self.load()
 
     # --- Загрузка / сохранение ---
@@ -91,22 +87,35 @@ class ConfigManager:
     def validate(self) -> list[str]:
         """Возвращает список проблем конфигурации (пусто — всё в порядке)."""
         problems: list[str] = []
-        cats = self.data["categories"]
+        nodes = self.nodes()
+        if not nodes:
+            problems.append(
+                "Конфигурация CoinKeeper не загружена — откройте «Конфигурация CoinKeeper» и загрузите файл"
+            )
+
+        def check(ref: str, label: str) -> None:
+            if ref not in nodes:
+                problems.append(f"{label}: ID {ref} не найден в конфигурации CoinKeeper")
+            elif nodes[ref].get("deleted"):
+                problems.append(f"{label}: «{nodes[ref].get('name', ref)}» удалён(а) в CoinKeeper")
+
         for key in ("expense_cat_id", "income_cat_id"):
             cid = self.data["defaults"].get(key, "")
             if not cid:
                 problems.append(f"defaults.{key} не задан — операции без правил некуда класть")
-            elif cid not in cats:
-                problems.append(f"defaults.{key}: категория {cid} не найдена в categories")
+            else:
+                check(cid, f"defaults.{key}")
         for acc, ck_id in self.data["account_map"].items():
-            if ck_id not in cats:
-                problems.append(f"Счёт {acc}: ID {ck_id} отсутствует в categories")
+            check(ck_id, f"Счёт {acc}")
         for source in ("vtb_category_rules", "operation_name_rules"):
             for pattern, rule in self.data[source].items():
                 if rule.get("type") not in RULE_TYPES:
                     problems.append(f"{source}[{pattern}]: неизвестный тип правила {rule.get('type')!r}")
-                elif rule["type"] in ("expense", "income", "saving") and rule.get("cat_id") not in cats:
-                    problems.append(f"{source}[{pattern}]: cat_id {rule.get('cat_id')!r} не найден в categories")
+                elif rule["type"] in ("expense", "income", "saving"):
+                    check(rule.get("cat_id", ""), f"{source}[{pattern}]")
+                elif rule["type"] == "transfer":
+                    for side in ("src_id", "dst_id"):
+                        check(rule.get(side, ""), f"{source}[{pattern}].{side}")
         return problems
 
     # --- Счета (банковский счёт -> счёт CoinKeeper) ---
@@ -121,25 +130,34 @@ class ConfigManager:
         self.data["account_map"].pop(bank_account, None)
         self.save()
 
-    # --- Узлы CoinKeeper: счета, категории, накопления ---
-    def get_ck_nodes(self, types: tuple[int, ...] | None = None) -> dict[str, dict[str, Any]]:
-        cats = self.data["categories"]
-        if types is None:
-            return dict(cats)
-        return {cid: c for cid, c in cats.items() if c.get("type") in types}
+    # --- Узлы CoinKeeper: счета, категории, цели, долги ---
+    def nodes(self) -> dict[str, dict[str, Any]]:
+        """Все известные узлы: ID -> {"name", "type", "deleted", ...}.
+
+        Основной источник — конфигурация CoinKeeper (ck_store); узлы из устаревшего
+        ручного раздела `categories` добавляются только если их там нет.
+        """
+        legacy = {
+            cid: {"deleted": False, **node}
+            for cid, node in self.data["categories"].items()
+            if isinstance(node, dict)
+        }
+        return {**legacy, **self.ck_store.nodes()}
+
+    def get_ck_nodes(
+        self, types: tuple[int, ...] | None = None, include_deleted: bool = False
+    ) -> dict[str, dict[str, Any]]:
+        return {
+            cid: n for cid, n in self.nodes().items()
+            if (types is None or n.get("type") in types) and (include_deleted or not n.get("deleted"))
+        }
 
     def ck_name(self, ck_id: str) -> str:
-        node = self.data["categories"].get(ck_id)
-        return node.get("name", ck_id) if node else ck_id
-
-    def add_ck_node(self, ck_id: str, name: str, node_type: int) -> None:
-        if ck_id:
-            self.data["categories"][ck_id] = {"name": name, "type": node_type}
-            self.save()
-
-    def remove_ck_node(self, ck_id: str) -> None:
-        self.data["categories"].pop(ck_id, None)
-        self.save()
+        node = self.nodes().get(ck_id)
+        if not node:
+            return ck_id
+        name = node.get("name", ck_id)
+        return f"{name} (удалён)" if node.get("deleted") else name
 
     # --- Правила ---
     def set_vtb_rule(self, vtb_cat_id: str, rule: dict[str, Any]) -> None:
